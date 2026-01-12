@@ -1,0 +1,289 @@
+import React, { useState } from 'react';
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Plus, Zap, Play, Pause, Edit, Trash2, AlertTriangle, Bell, Mail, Package } from "lucide-react";
+import { toast } from "sonner";
+
+const TRIGGERS = [
+  { value: 'inventory_threshold', label: 'Low Stock Alert', icon: Package },
+  { value: 'order_created', label: 'New Order', icon: Bell },
+  { value: 'schedule', label: 'Scheduled', icon: Zap },
+];
+
+const ACTIONS = [
+  { value: 'send_email', label: 'Send Email' },
+  { value: 'create_po', label: 'Create Purchase Order' },
+  { value: 'send_notification', label: 'Send Notification' },
+];
+
+export default function Automation() {
+  const [showForm, setShowForm] = useState(false);
+  const [editRule, setEditRule] = useState(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    trigger_type: 'inventory_threshold',
+    trigger_config: { threshold: 10 },
+    actions: [{ action_type: 'send_email', config: {} }],
+    is_active: true
+  });
+
+  const queryClient = useQueryClient();
+
+  const { data: workflows = [], isLoading } = useQuery({
+    queryKey: ['workflows'],
+    queryFn: () => base44.entities.WorkflowAutomation.list()
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => base44.entities.WorkflowAutomation.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      setShowForm(false);
+      resetForm();
+      toast.success('Automation rule created');
+    }
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.WorkflowAutomation.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      setShowForm(false);
+      resetForm();
+      toast.success('Automation rule updated');
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.WorkflowAutomation.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      toast.success('Automation rule deleted');
+    }
+  });
+
+  const resetForm = () => {
+    setEditRule(null);
+    setFormData({
+      name: '',
+      description: '',
+      trigger_type: 'inventory_threshold',
+      trigger_config: { threshold: 10 },
+      actions: [{ action_type: 'send_email', config: {} }],
+      is_active: true
+    });
+  };
+
+  const openEdit = (rule) => {
+    setEditRule(rule);
+    setFormData({
+      name: rule.name || '',
+      description: rule.description || '',
+      trigger_type: rule.trigger_type || 'inventory_threshold',
+      trigger_config: rule.trigger_config || { threshold: 10 },
+      actions: rule.actions || [{ action_type: 'send_email', config: {} }],
+      is_active: rule.is_active !== false
+    });
+    setShowForm(true);
+  };
+
+  const handleSave = () => {
+    if (!formData.name) {
+      toast.error('Name is required');
+      return;
+    }
+    if (editRule) {
+      updateMutation.mutate({ id: editRule.id, data: formData });
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const toggleActive = (rule) => {
+    updateMutation.mutate({ id: rule.id, data: { is_active: !rule.is_active } });
+  };
+
+  const stats = {
+    total: workflows.length,
+    active: workflows.filter(w => w.is_active).length,
+    inactive: workflows.filter(w => !w.is_active).length
+  };
+
+  return (
+    <div className="p-6 space-y-6 bg-slate-100 min-h-screen">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Automation</h1>
+          <p className="text-sm text-slate-500">AI-powered workflow automation</p>
+        </div>
+        <Button onClick={() => { resetForm(); setShowForm(true); }} className="bg-slate-900 hover:bg-slate-800">
+          <Plus className="w-4 h-4 mr-2" />
+          New Rule
+        </Button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-2xl font-bold">{stats.total}</p>
+            <p className="text-xs text-slate-500">Total Rules</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-2xl font-bold text-emerald-600">{stats.active}</p>
+            <p className="text-xs text-slate-500">Active</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-2xl font-bold text-slate-400">{stats.inactive}</p>
+            <p className="text-xs text-slate-500">Paused</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Rules List */}
+      <div className="space-y-4">
+        {workflows.map((rule) => {
+          const trigger = TRIGGERS.find(t => t.value === rule.trigger_type) || TRIGGERS[0];
+          const TriggerIcon = trigger.icon;
+          return (
+            <Card key={rule.id} className="border-0 shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded flex items-center justify-center ${rule.is_active ? 'bg-slate-900' : 'bg-slate-200'}`}>
+                      <TriggerIcon className={`w-5 h-5 ${rule.is_active ? 'text-white' : 'text-slate-400'}`} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-slate-900">{rule.name}</p>
+                      <p className="text-sm text-slate-500">{trigger.label} → {rule.actions?.map(a => ACTIONS.find(x => x.value === a.action_type)?.label).join(', ')}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">{rule.is_active ? 'Active' : 'Paused'}</span>
+                      <Switch
+                        checked={rule.is_active}
+                        onCheckedChange={() => toggleActive(rule)}
+                      />
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(rule)}>
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteMutation.mutate(rule.id)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+        {workflows.length === 0 && (
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-8 text-center text-slate-500">
+              {isLoading ? 'Loading...' : 'No automation rules yet'}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Form Dialog */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editRule ? 'Edit Rule' : 'New Automation Rule'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label>Rule Name *</Label>
+              <Input
+                value={formData.name}
+                onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
+                placeholder="e.g., Low Stock Alert"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
+                rows={2}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Trigger</Label>
+              <Select
+                value={formData.trigger_type}
+                onValueChange={(v) => setFormData(p => ({ ...p, trigger_type: v }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRIGGERS.map(t => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {formData.trigger_type === 'inventory_threshold' && (
+              <div className="space-y-2">
+                <Label>Stock Threshold</Label>
+                <Input
+                  type="number"
+                  value={formData.trigger_config.threshold || 10}
+                  onChange={(e) => setFormData(p => ({
+                    ...p,
+                    trigger_config: { ...p.trigger_config, threshold: parseInt(e.target.value) }
+                  }))}
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Action</Label>
+              <Select
+                value={formData.actions[0]?.action_type || 'send_email'}
+                onValueChange={(v) => setFormData(p => ({
+                  ...p,
+                  actions: [{ action_type: v, config: {} }]
+                }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ACTIONS.map(a => (
+                    <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between pt-2">
+              <Label>Active</Label>
+              <Switch
+                checked={formData.is_active}
+                onCheckedChange={(v) => setFormData(p => ({ ...p, is_active: v }))}
+              />
+            </div>
+            <div className="flex gap-3 pt-4 border-t">
+              <Button variant="outline" onClick={() => setShowForm(false)} className="flex-1">Cancel</Button>
+              <Button onClick={handleSave} className="flex-1 bg-slate-900 hover:bg-slate-800">
+                {editRule ? 'Update' : 'Create'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
