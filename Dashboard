@@ -1,0 +1,340 @@
+import React, { useMemo } from 'react';
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Package, DollarSign, AlertTriangle, ShoppingCart, Warehouse, Users,
+  TrendingUp, TrendingDown, ArrowRight, Clock, CheckCircle, Truck,
+  ClipboardList, Box, Send, BarChart3, RefreshCw, RotateCcw, ArrowLeftRight } from
+"lucide-react";
+import { toast } from "sonner";
+
+export default function Dashboard() {
+  const [showOnboarding, setShowOnboarding] = React.useState(false);
+  const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const user = await base44.auth.me();
+        const warehouses = await base44.entities.Warehouse.list();
+        if (warehouses.length === 0) {
+          setShowOnboarding(true);
+        }
+      } catch (e) {}
+    };
+    checkOnboarding();
+  }, []);
+
+  const { data: products = [] } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => base44.entities.Product.list()
+  });
+
+  const { data: salesOrders = [] } = useQuery({
+    queryKey: ['sales-orders'],
+    queryFn: () => base44.entities.SalesOrder.list()
+  });
+
+  const { data: purchaseOrders = [] } = useQuery({
+    queryKey: ['purchase-orders'],
+    queryFn: () => base44.entities.PurchaseOrder.list()
+  });
+
+  const { data: warehouses = [] } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => base44.entities.Warehouse.list()
+  });
+
+  const { data: customers = [] } = useQuery({
+    queryKey: ['customers'],
+    queryFn: () => base44.entities.Customer.list()
+  });
+
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => base44.entities.Supplier.list()
+  });
+
+  const { data: pickTasks = [] } = useQuery({
+    queryKey: ['pick-tasks'],
+    queryFn: () => base44.entities.PickTask.list()
+  });
+
+  const { data: shipments = [] } = useQuery({
+    queryKey: ['shipments'],
+    queryFn: () => base44.entities.Shipment.list()
+  });
+
+  const { data: returns = [] } = useQuery({
+    queryKey: ['return-orders'],
+    queryFn: () => base44.entities.ReturnOrder.list()
+  });
+
+  const { data: transfers = [] } = useQuery({
+    queryKey: ['transfer-orders'],
+    queryFn: () => base44.entities.TransferOrder.list()
+  });
+
+  const stats = useMemo(() => {
+    const lowStock = products.filter((p) => (p.current_stock || 0) <= (p.reorder_point || 0));
+    const inventoryValue = products.reduce((sum, p) => sum + (p.current_stock || 0) * (p.unit_price || 0), 0);
+    const pendingOrders = salesOrders.filter((o) => ['new', 'confirmed'].includes(o.status)).length;
+    const pendingPicks = pickTasks.filter((t) => ['pending', 'assigned'].includes(t.status)).length;
+    const readyToShip = shipments.filter((s) => ['packed', 'staged'].includes(s.status)).length;
+    const inTransit = shipments.filter((s) => s.status === 'in_transit').length;
+    const revenue = salesOrders.filter((o) => o.status !== 'cancelled').reduce((sum, o) => sum + (o.total || 0), 0);
+    const pendingReturns = returns.filter((r) => ['pending', 'approved'].includes(r.status)).length;
+    const activeTransfers = transfers.filter((t) => ['in_transit', 'receiving'].includes(t.status)).length;
+
+    return { lowStock, inventoryValue, pendingOrders, pendingPicks, readyToShip, inTransit, revenue, pendingReturns, activeTransfers };
+  }, [products, salesOrders, pickTasks, shipments, returns, transfers]);
+
+  const quickStats = [
+  { label: 'Total SKUs', value: products.length, icon: Package, link: 'Inventory' },
+  { label: 'Warehouses', value: warehouses.length, icon: Warehouse, link: 'Warehouses' },
+  { label: 'Customers', value: customers.length, icon: Users, link: 'Customers' },
+  { label: 'Suppliers', value: suppliers.length, icon: Truck, link: 'Suppliers' }];
+
+
+  const operationStats = [
+  { label: 'Pending Orders', value: stats.pendingOrders, icon: ShoppingCart, color: 'text-blue-600', link: 'Orders' },
+  { label: 'Picks Waiting', value: stats.pendingPicks, icon: ClipboardList, color: 'text-amber-600', link: 'Picking' },
+  { label: 'Ready to Ship', value: stats.readyToShip, icon: Box, color: 'text-purple-600', link: 'Shipping' },
+  { label: 'In Transit', value: stats.inTransit, icon: Send, color: 'text-emerald-600', link: 'Shipping' },
+  { label: 'Pending Returns', value: stats.pendingReturns, icon: RotateCcw, color: 'text-red-600', link: 'Returns' },
+  { label: 'Active Transfers', value: stats.activeTransfers, icon: ArrowLeftRight, color: 'text-indigo-600', link: 'Transfers' }];
+
+
+  if (showOnboarding) {
+    return (
+      <div className="p-6 bg-slate-100 min-h-screen flex items-center justify-center">
+        <Card className="max-w-md border-0 shadow-xl rounded-2xl">
+          <CardContent className="p-8 text-center">
+            <h2 className="text-2xl font-bold mb-4">Welcome to WarehousePro!</h2>
+            <p className="text-slate-600 mb-6">Let's set up your warehouse in a few quick steps.</p>
+            <Link to={createPageUrl('Onboarding')}>
+              <Button className="bg-blue-600 hover:bg-blue-700 rounded-xl w-full">
+                Start Setup
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>);
+
+  }
+
+  return (
+    <div className="p-6 space-y-6 bg-slate-100 dark:bg-slate-900 min-h-screen">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Dashboar</h1>
+          <p className="text-sm text-slate-500">Real-time warehouse overview</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => queryClient.invalidateQueries()}
+          className="text-slate-600">
+
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Primary Metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <DollarSign className="w-5 h-5 text-emerald-600" />
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+            </div>
+            <p className="text-2xl font-bold text-slate-900">${stats.revenue.toLocaleString()}</p>
+            <p className="text-xs text-slate-500">Total Revenue</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <Package className="w-5 h-5 text-blue-600" />
+              <span className="text-xs text-slate-400">{products.length} SKUs</span>
+            </div>
+            <p className="text-2xl font-bold text-slate-900">${stats.inventoryValue.toLocaleString()}</p>
+            <p className="text-xs text-slate-500">Inventory Value</p>
+          </CardContent>
+        </Card>
+        <Card className={`border-0 shadow-sm ${stats.lowStock.length > 0 ? 'ring-2 ring-amber-200' : ''}`}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <AlertTriangle className={`w-5 h-5 ${stats.lowStock.length > 0 ? 'text-amber-500' : 'text-slate-400'}`} />
+              {stats.lowStock.length > 0 && <Badge variant="outline" className="text-amber-600 border-amber-200 text-xs">Action</Badge>}
+            </div>
+            <p className="text-2xl font-bold text-slate-900">{stats.lowStock.length}</p>
+            <p className="text-xs text-slate-500">Low Stock Items</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <BarChart3 className="w-5 h-5 text-violet-600" />
+              <CheckCircle className="w-4 h-4 text-emerald-500" />
+            </div>
+            <p className="text-2xl font-bold text-slate-900">{purchaseOrders.length}</p>
+            <p className="text-xs text-slate-500">Purchase Orders</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Operations Status */}
+      <div>
+        <h2 className="text-sm font-semibold text-slate-700 mb-3 uppercase tracking-wide">Operations</h2>
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          {operationStats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <Link key={stat.label} to={createPageUrl(stat.link)}>
+                <Card className="border-0 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
+                        <p className="text-xs text-slate-500">{stat.label}</p>
+                      </div>
+                      <div className={`w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center ${stat.color}`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>);
+
+          })}
+        </div>
+      </div>
+
+      {/* Quick Access */}
+      <div>
+        <h2 className="text-sm font-semibold text-slate-700 mb-3 uppercase tracking-wide">Quick Access</h2>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {quickStats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <Link key={stat.label} to={createPageUrl(stat.link)}>
+                <Card className="border-0 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Icon className="w-5 h-5 text-slate-400" />
+                      <div>
+                        <p className="text-lg font-semibold text-slate-900">{stat.value}</p>
+                        <p className="text-xs text-slate-500">{stat.label}</p>
+                      </div>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-slate-300" />
+                  </CardContent>
+                </Card>
+              </Link>);
+
+          })}
+        </div>
+      </div>
+
+      {/* Low Stock Alert */}
+      {stats.lowStock.length > 0 &&
+      <Card className="border-0 shadow-sm border-l-4 border-l-amber-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <h3 className="font-semibold text-slate-900">Low Stock Alerts</h3>
+              </div>
+              <Link to={createPageUrl('Inventory')}>
+                <Button variant="outline" size="sm">View All</Button>
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {stats.lowStock.slice(0, 5).map((product) =>
+            <div key={product.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                  <div>
+                    <p className="font-medium text-slate-900 text-sm">{product.name}</p>
+                    <p className="text-xs text-slate-500">SKU: {product.sku}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-amber-600">{product.current_stock || 0}</p>
+                    <p className="text-xs text-slate-400">Reorder: {product.reorder_point || 0}</p>
+                  </div>
+                </div>
+            )}
+            </div>
+          </CardContent>
+        </Card>
+      }
+
+      {/* Recent Activity */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-900">Recent Orders</h3>
+              <Link to={createPageUrl('Orders')}>
+                <Button variant="ghost" size="sm" className="text-slate-500">
+                  View All <ArrowRight className="w-3 h-3 ml-1" />
+                </Button>
+              </Link>
+            </div>
+            <div className="space-y-3">
+              {salesOrders.slice(0, 5).map((order) =>
+              <div key={order.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                  <div>
+                    <p className="font-medium text-sm text-slate-900">{order.order_number}</p>
+                    <p className="text-xs text-slate-500">{order.customer_name}</p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {order.status}
+                  </Badge>
+                </div>
+              )}
+              {salesOrders.length === 0 &&
+              <p className="text-sm text-slate-400 text-center py-4">No orders yet</p>
+              }
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-900">Recent Shipments</h3>
+              <Link to={createPageUrl('Shipping')}>
+                <Button variant="ghost" size="sm" className="text-slate-500">
+                  View All <ArrowRight className="w-3 h-3 ml-1" />
+                </Button>
+              </Link>
+            </div>
+            <div className="space-y-3">
+              {shipments.slice(0, 5).map((shipment) =>
+              <div key={shipment.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                  <div>
+                    <p className="font-medium text-sm text-slate-900">{shipment.shipment_number}</p>
+                    <p className="text-xs text-slate-500">{shipment.carrier}</p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {shipment.status}
+                  </Badge>
+                </div>
+              )}
+              {shipments.length === 0 &&
+              <p className="text-sm text-slate-400 text-center py-4">No shipments yet</p>
+              }
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>);
+
+}
