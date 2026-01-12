@@ -1,0 +1,846 @@
+import React, { useState, useEffect } from 'react';
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
+import { 
+  Shield, Users, Key, DollarSign, Calendar, Plus, Copy, RefreshCw, 
+  CheckCircle, XCircle, Clock, AlertTriangle, Search, MoreVertical, Activity
+} from "lucide-react";
+import { format, addDays, addMonths, differenceInDays } from "date-fns";
+import { toast } from "sonner";
+import UserStatsWidget from "../components/admin/UserStatsWidget";
+import AlertsDashboard from "../components/alerts/AlertsDashboard";
+import AlertsManager from "../components/alerts/AlertsManager";
+
+const ADMIN_PASSWORD = 'Funchat185$';
+
+export default function AdminPanel() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginInput, setLoginInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showActivity, setShowActivity] = useState(false);
+  const [activityFilter, setActivityFilter] = useState('all');
+  const [newUser, setNewUser] = useState({
+    user_email: '',
+    company_name: '',
+    status: 'trial'
+  });
+
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    // Check if already authenticated via session
+    const savedAuth = sessionStorage.getItem('admin_auth');
+    if (savedAuth === 'true') {
+      setIsAuthenticated(true);
+    }
+    setLoading(false);
+  }, []);
+
+  const handleAdminLogin = () => {
+    if (loginInput === ADMIN_PASSWORD) {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('admin_auth', 'true');
+      setLoginError('');
+    } else {
+      setLoginError('Invalid password');
+    }
+  };
+
+  const { data: licenses = [] } = useQuery({
+    queryKey: ['licenses'],
+    queryFn: () => base44.entities.UserLicense.list('-created_date'),
+    enabled: isAuthenticated
+  });
+
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ['all-users'],
+    queryFn: () => base44.entities.User.list(),
+    enabled: isAuthenticated
+  });
+
+  const { data: subscriptions = [] } = useQuery({
+    queryKey: ['subscriptions'],
+    queryFn: () => base44.entities.Subscription.list('-created_date'),
+    enabled: isAuthenticated
+  });
+
+  const { data: activityLogs = [] } = useQuery({
+    queryKey: ['activity-logs'],
+    queryFn: () => base44.entities.ActivityLog.list('-created_date', 500),
+    enabled: isAuthenticated
+  });
+
+  const approveSubscriptionMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.Subscription.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
+      toast.success('Subscription activated');
+    }
+  });
+
+  const generateApiKey = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let key = 'WMS-';
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        key += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      if (i < 3) key += '-';
+    }
+    return key;
+  };
+
+  const createLicenseMutation = useMutation({
+    mutationFn: async (data) => {
+      const today = new Date().toISOString().split('T')[0];
+      const trialEnd = format(addDays(new Date(), 14), 'yyyy-MM-dd');
+      const apiKey = generateApiKey();
+      
+      const license = await base44.entities.UserLicense.create({
+        ...data,
+        api_key: apiKey,
+        trial_start: today,
+        trial_end: trialEnd,
+        status: 'trial'
+      });
+
+      // Send welcome email
+      await base44.integrations.Core.SendEmail({
+        to: data.user_email,
+        from_name: 'WarehousePro Team',
+        subject: 'Welcome to WarehousePro - Your 14-Day Trial Starts Now!',
+        body: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #1e293b;">Welcome to WarehousePro! 🎉</h1>
+            <p>Hi there,</p>
+            <p>Your WarehousePro account is ready! We're excited to help you streamline your warehouse operations.</p>
+            
+            <div style="background: #f1f5f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0;">Your API Key</h3>
+              <code style="background: white; padding: 10px; display: block; border-radius: 4px; font-size: 14px;">${apiKey}</code>
+              <p style="font-size: 12px; color: #64748b; margin-bottom: 0;">Keep this key safe! You'll need it to access your account.</p>
+            </div>
+
+            <h3>Getting Started:</h3>
+            <ol style="line-height: 1.8;">
+              <li><strong>Set up your first warehouse</strong> - Define your storage locations</li>
+              <li><strong>Add products</strong> - Build your inventory catalog</li>
+              <li><strong>Configure suppliers</strong> - Manage your supply chain</li>
+              <li><strong>Create your first order</strong> - Test the full workflow</li>
+              <li><strong>Explore AI features</strong> - Try our AI Assistant for smart insights</li>
+            </ol>
+
+            <div style="background: #dbeafe; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 0;"><strong>📅 Trial Period:</strong> 14 days</p>
+              <p style="margin: 10px 0 0 0;"><strong>💰 After Trial:</strong> $49/month</p>
+            </div>
+
+            <p>Need help? Our in-app AI assistant is ready to guide you through any questions!</p>
+            
+            <p style="margin-top: 30px;">
+              Happy warehousing!<br>
+              <strong>The WarehousePro Team</strong>
+            </p>
+          </div>
+        `
+      });
+
+      return license;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['licenses'] });
+      setShowAddUser(false);
+      setNewUser({ user_email: '', company_name: '', status: 'trial' });
+      toast.success('User created and welcome email sent!');
+    }
+  });
+
+  const updateLicenseMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.UserLicense.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['licenses'] });
+      toast.success('License updated');
+    }
+  });
+
+  const activateSubscription = (license) => {
+    const today = new Date().toISOString().split('T')[0];
+    const periodEnd = format(addMonths(new Date(), 1), 'yyyy-MM-dd');
+    const newKey = generateApiKey();
+    
+    updateLicenseMutation.mutate({
+      id: license.id,
+      data: {
+        status: 'active',
+        api_key: newKey,
+        subscription_start: license.subscription_start || today,
+        current_period_end: periodEnd,
+        amount_paid: (license.amount_paid || 0) + 49,
+        payment_history: [
+          ...(license.payment_history || []),
+          { date: today, amount: 49, method: 'manual', note: 'Monthly payment' }
+        ]
+      }
+    });
+  };
+
+  const renewApiKey = (license) => {
+    const periodEnd = format(addMonths(new Date(), 1), 'yyyy-MM-dd');
+    const newKey = generateApiKey();
+    
+    updateLicenseMutation.mutate({
+      id: license.id,
+      data: {
+        api_key: newKey,
+        current_period_end: periodEnd,
+        amount_paid: (license.amount_paid || 0) + 49,
+        payment_history: [
+          ...(license.payment_history || []),
+          { date: new Date().toISOString().split('T')[0], amount: 49, method: 'manual', note: 'Renewal' }
+        ]
+      }
+    });
+  };
+
+  const suspendUser = (license) => {
+    if (!window.confirm(`Suspend user ${license.user_email}? They will lose access immediately.`)) return;
+    updateLicenseMutation.mutate({
+      id: license.id,
+      data: { status: 'suspended' }
+    });
+  };
+
+  const deleteUser = (license) => {
+    if (!window.confirm(`Delete user ${license.user_email}? This cannot be undone.`)) return;
+    base44.entities.UserLicense.delete(license.id).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['licenses'] });
+      toast.success('User deleted');
+    });
+  };
+
+  const exportUserData = (userEmail) => {
+    const userData = {
+      user: licenses.find(l => l.user_email === userEmail),
+      activities: activityLogs.filter(log => log.user_email === userEmail),
+      subscription: subscriptions.find(s => s.user_email === userEmail)
+    };
+    
+    const blob = new Blob([JSON.stringify(userData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${userEmail}_data_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    toast.success('User data exported');
+  };
+
+  const exportAllData = () => {
+    const allData = {
+      licenses,
+      subscriptions,
+      activityLogs,
+      exportDate: new Date().toISOString(),
+      stats
+    };
+    
+    const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `admin_export_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    toast.success('All data exported');
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    toast.success('API key copied');
+  };
+
+  const accessUserAccount = (userEmail) => {
+    sessionStorage.setItem('impersonate_user', userEmail);
+    sessionStorage.setItem('impersonate_time', new Date().toISOString());
+    window.location.href = '/';
+  };
+
+  const viewUserActivity = (userEmail) => {
+    setActivityFilter('all');
+    setShowActivity(true);
+    setTimeout(() => {
+      // Scroll to user's activities
+      const userLogs = activityLogs.filter(log => log.user_email === userEmail);
+      if (userLogs.length > 0) {
+        toast.success(`Showing ${userLogs.length} activities for ${userEmail}`);
+      }
+    }, 100);
+  };
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <Card className="w-full max-w-md border-0 shadow-2xl">
+          <CardContent className="p-8">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Shield className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">Admin Access</h2>
+              <p className="text-slate-500 text-sm">Enter password to continue</p>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Input
+                  type="password"
+                  value={loginInput}
+                  onChange={(e) => setLoginInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdminLogin()}
+                  placeholder="Admin password"
+                  className="text-center"
+                />
+                {loginError && (
+                  <p className="text-red-500 text-sm text-center">{loginError}</p>
+                )}
+              </div>
+              <Button 
+                onClick={handleAdminLogin} 
+                className="w-full bg-slate-900 hover:bg-slate-800"
+              >
+                Access Admin Panel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const filteredLicenses = licenses.filter(l => 
+    l.user_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    l.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const pendingPayments = subscriptions.filter(s => s.status === 'pending_payment');
+
+  const stats = {
+    total: licenses.length,
+    active: licenses.filter(l => l.status === 'active').length,
+    trial: licenses.filter(l => l.status === 'trial').length,
+    expired: licenses.filter(l => l.status === 'expired' || l.status === 'suspended').length,
+    revenue: licenses.reduce((sum, l) => sum + (l.amount_paid || 0), 0),
+    pending: pendingPayments.length
+  };
+
+  const statusConfig = {
+    trial: { color: 'bg-blue-100 text-blue-700', icon: Clock, label: 'Trial' },
+    active: { color: 'bg-emerald-100 text-emerald-700', icon: CheckCircle, label: 'Active' },
+    expired: { color: 'bg-amber-100 text-amber-700', icon: AlertTriangle, label: 'Expired' },
+    suspended: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'Suspended' }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
+              <Shield className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">Admin Panel</h1>
+              <p className="text-sm text-slate-500">Manage users & subscriptions</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={exportAllData} variant="outline">
+              <DollarSign className="w-4 h-4 mr-2" />
+              Export All
+            </Button>
+            <Button onClick={() => setShowActivity(true)} variant="outline">
+              <Activity className="w-4 h-4 mr-2" />
+              Activity
+            </Button>
+            <Button onClick={() => setShowAddUser(true)} className="bg-slate-900 hover:bg-slate-800">
+              <Plus className="w-4 h-4 mr-2" />
+              Add User
+            </Button>
+          </div>
+        </div>
+
+        {/* Pending Payments Alert */}
+        {pendingPayments.length > 0 && (
+          <Card className="border-0 shadow-lg bg-amber-50 border-l-4 border-l-amber-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                  <div>
+                    <p className="font-semibold text-amber-900">{pendingPayments.length} Pending Payments</p>
+                    <p className="text-sm text-amber-700">Review and approve subscriptions</p>
+                  </div>
+                </div>
+                <Button variant="outline" onClick={() => setSelectedUser(pendingPayments[0])}>
+                  Review
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Quick Stats Summary */}
+        <Card className="border-0 shadow-sm bg-gradient-to-br from-slate-900 to-slate-800 text-white">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div>
+                <p className="text-slate-300 text-sm mb-1">Monthly Revenue</p>
+                <p className="text-3xl font-bold">${stats.active * 49}</p>
+              </div>
+              <div>
+                <p className="text-slate-300 text-sm mb-1">Active Users</p>
+                <p className="text-3xl font-bold">{stats.active}</p>
+              </div>
+              <div>
+                <p className="text-slate-300 text-sm mb-1">Trial Users</p>
+                <p className="text-3xl font-bold">{stats.trial}</p>
+              </div>
+              <div>
+                <p className="text-slate-300 text-sm mb-1">Total Activities</p>
+                <p className="text-3xl font-bold">{activityLogs.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* User Analytics */}
+        <UserStatsWidget licenses={licenses} activityLogs={activityLogs} />
+
+        {/* Inventory Alerts */}
+        <AlertsDashboard />
+
+        {/* Alert Configuration */}
+        <AlertsManager />
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <Users className="w-5 h-5 text-slate-400" />
+                <span className="text-2xl font-bold">{stats.total}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">Total Users</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <CheckCircle className="w-5 h-5 text-emerald-500" />
+                <span className="text-2xl font-bold">{stats.active}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">Active</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <Clock className="w-5 h-5 text-blue-500" />
+                <span className="text-2xl font-bold">{stats.trial}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">On Trial</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <XCircle className="w-5 h-5 text-red-500" />
+                <span className="text-2xl font-bold">{stats.expired}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">Expired</p>
+            </CardContent>
+          </Card>
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <DollarSign className="w-5 h-5 text-emerald-500" />
+                <span className="text-2xl font-bold">${stats.revenue}</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">Total Revenue</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input
+            placeholder="Search by email or company..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 bg-white"
+          />
+        </div>
+
+        {/* Users Table */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 border-b">
+                  <tr>
+                    <th className="text-left p-4 text-xs font-medium text-slate-500 uppercase">User</th>
+                    <th className="text-left p-4 text-xs font-medium text-slate-500 uppercase">Status</th>
+                    <th className="text-left p-4 text-xs font-medium text-slate-500 uppercase">API Key</th>
+                    <th className="text-left p-4 text-xs font-medium text-slate-500 uppercase">Expires</th>
+                    <th className="text-left p-4 text-xs font-medium text-slate-500 uppercase">Paid</th>
+                    <th className="text-right p-4 text-xs font-medium text-slate-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredLicenses.map((license) => {
+                    const status = statusConfig[license.status] || statusConfig.trial;
+                    const StatusIcon = status.icon;
+                    const expiryDate = license.status === 'trial' ? license.trial_end : license.current_period_end;
+                    const daysLeft = expiryDate ? differenceInDays(new Date(expiryDate), new Date()) : null;
+
+                    return (
+                      <tr key={license.id} className="hover:bg-slate-50">
+                        <td className="p-4">
+                          <div>
+                            <p className="font-medium text-slate-900">{license.user_email}</p>
+                            <p className="text-sm text-slate-500">{license.company_name || '—'}</p>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <Badge className={status.color}>
+                            <StatusIcon className="w-3 h-3 mr-1" />
+                            {status.label}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs bg-slate-100 px-2 py-1 rounded font-mono">
+                              {license.api_key || '—'}
+                            </code>
+                            {license.api_key && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                onClick={() => copyToClipboard(license.api_key)}
+                              >
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          {expiryDate ? (
+                            <div>
+                              <p className="text-sm">{format(new Date(expiryDate), 'MMM d, yyyy')}</p>
+                              <p className={`text-xs ${daysLeft < 0 ? 'text-red-500' : daysLeft < 7 ? 'text-amber-500' : 'text-slate-500'}`}>
+                                {daysLeft < 0 ? `${Math.abs(daysLeft)} days ago` : `${daysLeft} days left`}
+                              </p>
+                            </div>
+                          ) : '—'}
+                        </td>
+                        <td className="p-4">
+                          <span className="font-medium">${license.amount_paid || 0}</span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => viewUserActivity(license.user_email)}
+                              className="text-slate-600"
+                            >
+                              <Activity className="w-3 h-3 mr-1" />
+                              Activity
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => accessUserAccount(license.user_email)}
+                              className="bg-slate-900 text-white hover:bg-slate-800"
+                            >
+                              <Users className="w-3 h-3 mr-1" />
+                              Access
+                            </Button>
+                            {license.status === 'trial' && (
+                              <Button
+                                size="sm"
+                                onClick={() => activateSubscription(license)}
+                                className="bg-emerald-600 hover:bg-emerald-700"
+                              >
+                                Activate $49
+                              </Button>
+                            )}
+                            {license.status === 'active' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => renewApiKey(license)}
+                              >
+                                <RefreshCw className="w-3 h-3 mr-1" />
+                                Renew
+                              </Button>
+                            )}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="sm" variant="ghost">
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => exportUserData(license.user_email)}>
+                                  Export Data
+                                </DropdownMenuItem>
+                                {license.status !== 'suspended' && (
+                                  <DropdownMenuItem 
+                                    onClick={() => suspendUser(license)}
+                                    className="text-amber-600"
+                                  >
+                                    Suspend User
+                                  </DropdownMenuItem>
+                                )}
+                                {license.status === 'suspended' && (
+                                  <DropdownMenuItem onClick={() => activateSubscription(license)}>
+                                    Reactivate
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem 
+                                  onClick={() => deleteUser(license)}
+                                  className="text-red-600"
+                                >
+                                  Delete User
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredLicenses.length === 0 && (
+                <div className="p-8 text-center text-slate-500">
+                  No users found
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Activity Dialog */}
+        <Dialog open={showActivity} onOpenChange={setShowActivity}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle>User Activity Log</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+              <div className="flex gap-3">
+                <Select value={activityFilter} onValueChange={setActivityFilter}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Filter by action" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Activity</SelectItem>
+                    <SelectItem value="view">Page Views</SelectItem>
+                    <SelectItem value="create">Create</SelectItem>
+                    <SelectItem value="update">Update</SelectItem>
+                    <SelectItem value="delete">Delete</SelectItem>
+                    <SelectItem value="click">Clicks</SelectItem>
+                    <SelectItem value="scroll">Scrolls</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Filter by user email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="max-w-xs"
+                />
+              </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-2">
+                {activityLogs
+                  .filter(log => {
+                    const matchesType = activityFilter === 'all' || 
+                      (activityFilter === 'view' ? log.action_type === 'page_view' : log.action_type === activityFilter);
+                    const matchesUser = !searchTerm || log.user_email?.toLowerCase().includes(searchTerm.toLowerCase());
+                    return matchesType && matchesUser;
+                  })
+                  .map((log) => {
+                    const actionColors = {
+                      create: 'bg-emerald-100 text-emerald-700',
+                      update: 'bg-blue-100 text-blue-700',
+                      delete: 'bg-red-100 text-red-700',
+                      page_view: 'bg-purple-100 text-purple-700',
+                      click: 'bg-slate-100 text-slate-700',
+                      scroll: 'bg-slate-100 text-slate-600'
+                    };
+                    const color = actionColors[log.action_type] || 'bg-slate-100 text-slate-700';
+                    
+                    return (
+                      <div key={log.id} className="p-3 border rounded-lg hover:bg-slate-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge className={`text-xs ${color}`}>
+                                {log.action_type}
+                              </Badge>
+                              <span className="text-sm font-medium text-slate-900">
+                                {log.user_email}
+                              </span>
+                            </div>
+                            <p className="text-sm text-slate-600">
+                              {log.description || `${log.action_type} ${log.entity_type}`}
+                            </p>
+                            {log.entity_type && (
+                              <p className="text-xs text-slate-500 mt-1">
+                                Entity: {log.entity_type} {log.entity_id && `(ID: ${log.entity_id})`}
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-xs text-slate-400 whitespace-nowrap ml-4">
+                            {log.created_date ? format(new Date(log.created_date), 'MMM d, h:mm a') : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                {activityLogs.length === 0 && (
+                  <div className="p-8 text-center text-slate-500">
+                    <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                    <p>No activity logged yet</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add User Dialog */}
+        <Dialog open={showAddUser} onOpenChange={setShowAddUser}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add New User</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              {selectedUser ? (
+                <>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-slate-100 rounded-xl">
+                      <span className="text-sm font-medium">User</span>
+                      <span className="text-sm">{selectedUser.user_email}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-100 rounded-xl">
+                      <span className="text-sm font-medium">Plan</span>
+                      <Badge>{selectedUser.plan}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-slate-100 rounded-xl">
+                      <span className="text-sm font-medium">Amount</span>
+                      <span className="text-lg font-bold text-emerald-600">${selectedUser.amount_paid}</span>
+                    </div>
+                    {selectedUser.cash_app_username && (
+                      <div className="flex items-center justify-between p-3 bg-slate-100 rounded-xl">
+                        <span className="text-sm font-medium">Cash App</span>
+                        <span className="text-sm font-mono">{selectedUser.cash_app_username}</span>
+                      </div>
+                    )}
+                    {selectedUser.payment_screenshot && (
+                      <div className="p-3 bg-slate-100 rounded-xl">
+                        <p className="text-sm font-medium mb-2">Payment Screenshot</p>
+                        <img src={selectedUser.payment_screenshot} className="w-full rounded-lg" alt="Payment proof" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-3 pt-4 border-t">
+                    <Button variant="outline" onClick={() => setSelectedUser(null)} className="flex-1">
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        approveSubscriptionMutation.mutate({
+                          id: selectedUser.id,
+                          data: {
+                            status: 'active',
+                            start_date: new Date().toISOString(),
+                            end_date: format(addMonths(new Date(), selectedUser.billing_cycle === 'annual' ? 12 : 1), 'yyyy-MM-dd')
+                          }
+                        });
+                        setSelectedUser(null);
+                      }}
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Approve & Activate
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>Email Address</Label>
+                    <Input
+                      value={newUser.user_email}
+                      onChange={(e) => setNewUser(prev => ({ ...prev, user_email: e.target.value }))}
+                      placeholder="user@company.com"
+                    />
+                  </div>
+              <div className="space-y-2">
+                <Label>Company Name</Label>
+                <Input
+                  value={newUser.company_name}
+                  onChange={(e) => setNewUser(prev => ({ ...prev, company_name: e.target.value }))}
+                  placeholder="Acme Warehousing"
+                />
+              </div>
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <p className="text-sm text-blue-700">
+                  User will receive a 14-day free trial. After trial, $49/month to continue.
+                </p>
+              </div>
+                  <div className="flex gap-3">
+                    <Button variant="outline" onClick={() => setShowAddUser(false)} className="flex-1">
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => createLicenseMutation.mutate(newUser)}
+                      className="flex-1 bg-slate-900 hover:bg-slate-800"
+                      disabled={!newUser.user_email}
+                    >
+                      Create License
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}
