@@ -1,0 +1,281 @@
+import React, { useState } from 'react';
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ClipboardCheck, Package, CheckCircle, Clock, AlertTriangle, Plus } from "lucide-react";
+import { format } from "date-fns";
+import { toast } from "sonner";
+
+export default function CycleCounts() {
+  const [activeCount, setActiveCount] = useState(null);
+  const queryClient = useQueryClient();
+
+  const { data: cycleCounts = [], isLoading } = useQuery({
+    queryKey: ['cycle-counts'],
+    queryFn: () => base44.entities.CycleCount.list('-created_date')
+  });
+
+  const { data: products = [] } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => base44.entities.Product.list()
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (type) => {
+      const selectedProducts = type === 'abc' 
+        ? products.filter(p => (p.selling_price || 0) > 50).slice(0, 10)
+        : products.slice(0, 10);
+      
+      return base44.entities.CycleCount.create({
+        count_id: `CC-${Date.now().toString().slice(-8)}`,
+        warehouse_id: 'default',
+        count_type: type,
+        status: 'scheduled',
+        scheduled_date: new Date().toISOString().split('T')[0],
+        locations: selectedProducts.map(p => ({
+          location_id: p.location || 'A-01-01',
+          location_path: p.location || 'A-01-01',
+          product_id: p.id,
+          sku: p.sku,
+          system_qty: p.current_stock || 0,
+          counted_qty: null,
+          variance: 0,
+          recount_required: false
+        })),
+        total_locations: selectedProducts.length,
+        locations_counted: 0
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cycle-counts'] });
+      toast.success('Cycle count created');
+    }
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.CycleCount.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cycle-counts'] });
+    }
+  });
+
+  const recordCount = (locationIndex, countedQty) => {
+    if (!activeCount) return;
+    const locations = [...activeCount.locations];
+    const systemQty = locations[locationIndex].system_qty || 0;
+    const counted = parseInt(countedQty) || 0;
+    
+    locations[locationIndex] = {
+      ...locations[locationIndex],
+      counted_qty: counted,
+      variance: counted - systemQty,
+      counted_at: new Date().toISOString()
+    };
+
+    const countedLocations = locations.filter(l => l.counted_qty !== null).length;
+    
+    updateMutation.mutate({
+      id: activeCount.id,
+      data: { locations, locations_counted: countedLocations }
+    });
+    setActiveCount(prev => ({ ...prev, locations, locations_counted: countedLocations }));
+  };
+
+  const completeCount = () => {
+    if (!activeCount) return;
+    const totalVariance = activeCount.locations.reduce((sum, l) => sum + Math.abs(l.variance || 0), 0);
+    const accuracy = activeCount.locations.length > 0
+      ? ((activeCount.locations.filter(l => l.variance === 0).length / activeCount.locations.length) * 100).toFixed(1)
+      : 100;
+
+    updateMutation.mutate({
+      id: activeCount.id,
+      data: {
+        status: 'completed',
+        total_variance_units: totalVariance,
+        accuracy_percentage: parseFloat(accuracy)
+      }
+    });
+    setActiveCount(null);
+    toast.success('Cycle count completed');
+  };
+
+  const statusConfig = {
+    scheduled: { color: 'bg-slate-100 text-slate-700', icon: Clock },
+    in_progress: { color: 'bg-amber-100 text-amber-700', icon: ClipboardCheck },
+    completed: { color: 'bg-emerald-100 text-emerald-700', icon: CheckCircle },
+    pending_review: { color: 'bg-purple-100 text-purple-700', icon: AlertTriangle }
+  };
+
+  const stats = {
+    scheduled: cycleCounts.filter(c => c.status === 'scheduled').length,
+    inProgress: cycleCounts.filter(c => c.status === 'in_progress').length,
+    completed: cycleCounts.filter(c => c.status === 'completed').length
+  };
+
+  return (
+    <div className="p-6 space-y-6 bg-slate-100 min-h-screen">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Cycle Counts</h1>
+          <p className="text-sm text-slate-500">Inventory accuracy management</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => createMutation.mutate('abc')}>
+            <Plus className="w-4 h-4 mr-1" />
+            ABC Count
+          </Button>
+          <Button onClick={() => createMutation.mutate('random')} className="bg-slate-900 hover:bg-slate-800">
+            <Plus className="w-4 h-4 mr-1" />
+            Random Count
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-2xl font-bold">{stats.scheduled}</p>
+            <p className="text-xs text-slate-500">Scheduled</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-2xl font-bold text-amber-600">{stats.inProgress}</p>
+            <p className="text-xs text-slate-500">In Progress</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <p className="text-2xl font-bold text-emerald-600">{stats.completed}</p>
+            <p className="text-xs text-slate-500">Completed</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Counts List */}
+        <div className="space-y-3">
+          {cycleCounts.map((count) => {
+            const status = statusConfig[count.status] || statusConfig.scheduled;
+            const StatusIcon = status.icon;
+            const progress = count.total_locations > 0
+              ? (count.locations_counted / count.total_locations) * 100
+              : 0;
+
+            return (
+              <Card
+                key={count.id}
+                className={`border-0 shadow-sm cursor-pointer hover:shadow-md ${
+                  activeCount?.id === count.id ? 'ring-2 ring-slate-900' : ''
+                }`}
+                onClick={() => {
+                  setActiveCount(count);
+                  if (count.status === 'scheduled') {
+                    updateMutation.mutate({ id: count.id, data: { status: 'in_progress' } });
+                  }
+                }}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="font-medium text-slate-900">{count.count_id}</p>
+                      <p className="text-xs text-slate-500">{count.count_type} count</p>
+                    </div>
+                    <Badge className={status.color}>
+                      <StatusIcon className="w-3 h-3 mr-1" />
+                      {count.status}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mb-2">
+                    <span className="text-slate-500">
+                      {count.locations_counted || 0}/{count.total_locations || 0} locations
+                    </span>
+                    {count.accuracy_percentage && (
+                      <span className="font-medium">{count.accuracy_percentage}% accuracy</span>
+                    )}
+                  </div>
+                  <Progress value={progress} className="h-1.5" />
+                </CardContent>
+              </Card>
+            );
+          })}
+          {cycleCounts.length === 0 && (
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-8 text-center text-slate-500">
+                {isLoading ? 'Loading...' : 'No cycle counts'}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Count Detail */}
+        {activeCount ? (
+          <Card className="border-0 shadow-sm sticky top-6">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900">{activeCount.count_id}</h3>
+                <Badge variant="outline">{activeCount.count_type}</Badge>
+              </div>
+
+              <div className="space-y-3 max-h-96 overflow-auto">
+                {activeCount.locations?.map((loc, index) => (
+                  <div key={index} className="p-3 bg-slate-50 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="font-medium text-sm">{loc.sku}</p>
+                        <p className="text-xs text-slate-500">{loc.location_path}</p>
+                      </div>
+                      {loc.variance !== 0 && loc.counted_qty !== null && (
+                        <Badge className={loc.variance > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
+                          {loc.variance > 0 ? '+' : ''}{loc.variance}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-slate-500">System Qty</p>
+                        <p className="font-semibold">{loc.system_qty}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Counted</p>
+                        <Input
+                          type="number"
+                          value={loc.counted_qty ?? ''}
+                          onChange={(e) => recordCount(index, e.target.value)}
+                          placeholder="—"
+                          className="h-8"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <Button
+                className="w-full mt-4 bg-slate-900 hover:bg-slate-800"
+                onClick={completeCount}
+                disabled={activeCount.locations?.some(l => l.counted_qty === null)}
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Complete Count
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-8 text-center text-slate-500">
+              Select a count to begin
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
