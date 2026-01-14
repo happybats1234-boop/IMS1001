@@ -1,0 +1,455 @@
+import React, { useState } from 'react';
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { 
+  Plus, Settings, Truck, ShoppingCart, CheckCircle, XCircle, AlertCircle, 
+  RefreshCw, Zap, Package
+} from "lucide-react";
+import { toast } from "sonner";
+
+export default function Integrations() {
+  const [showShippingDialog, setShowShippingDialog] = useState(false);
+  const [showStoreDialog, setShowStoreDialog] = useState(false);
+  const [selectedShipping, setSelectedShipping] = useState(null);
+  const [selectedStore, setSelectedStore] = useState(null);
+
+  const queryClient = useQueryClient();
+
+  const { data: shippingIntegrations = [] } = useQuery({
+    queryKey: ['shipping-integrations'],
+    queryFn: () => base44.entities.ShippingIntegration.list()
+  });
+
+  const { data: storeIntegrations = [] } = useQuery({
+    queryKey: ['store-integrations'],
+    queryFn: () => base44.entities.StoreIntegration.list()
+  });
+
+  const createShippingMutation = useMutation({
+    mutationFn: (data) => base44.entities.ShippingIntegration.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shipping-integrations'] });
+      setShowShippingDialog(false);
+      setSelectedShipping(null);
+      toast.success('Shipping integration added');
+    }
+  });
+
+  const updateShippingMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.ShippingIntegration.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shipping-integrations'] });
+      toast.success('Integration updated');
+    }
+  });
+
+  const createStoreMutation = useMutation({
+    mutationFn: (data) => base44.entities.StoreIntegration.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['store-integrations'] });
+      setShowStoreDialog(false);
+      setSelectedStore(null);
+      toast.success('Store integration added');
+    }
+  });
+
+  const updateStoreMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.StoreIntegration.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['store-integrations'] });
+      toast.success('Store updated');
+    }
+  });
+
+  const shippingProviders = [
+    { value: 'shipstation', label: 'ShipStation', desc: 'Multi-carrier shipping platform' },
+    { value: 'easypost', label: 'EasyPost', desc: 'Shipping API aggregator' },
+    { value: 'shippo', label: 'Shippo', desc: 'Multi-carrier API' },
+    { value: 'stamps', label: 'Stamps.com', desc: 'USPS shipping' },
+    { value: 'fedex_direct', label: 'FedEx Direct', desc: 'Direct FedEx integration' },
+    { value: 'ups_direct', label: 'UPS Direct', desc: 'Direct UPS integration' },
+    { value: 'usps_direct', label: 'USPS Direct', desc: 'Direct USPS integration' },
+    { value: 'dhl_direct', label: 'DHL Direct', desc: 'Direct DHL integration' },
+  ];
+
+  const storePlatforms = [
+    { value: 'shopify', label: 'Shopify', desc: 'E-commerce platform' },
+    { value: 'woocommerce', label: 'WooCommerce', desc: 'WordPress e-commerce' },
+    { value: 'amazon', label: 'Amazon', desc: 'Amazon Seller Central' },
+    { value: 'ebay', label: 'eBay', desc: 'eBay marketplace' },
+    { value: 'magento', label: 'Magento', desc: 'Adobe Commerce' },
+    { value: 'bigcommerce', label: 'BigCommerce', desc: 'SaaS e-commerce' },
+    { value: 'square', label: 'Square', desc: 'Point of sale & online' },
+    { value: 'etsy', label: 'Etsy', desc: 'Handmade marketplace' },
+    { value: 'walmart', label: 'Walmart', desc: 'Walmart Marketplace' },
+    { value: 'custom_api', label: 'Custom API', desc: 'Custom integration' },
+  ];
+
+  const statusConfig = {
+    active: { color: 'bg-emerald-100 text-emerald-700', icon: CheckCircle },
+    inactive: { color: 'bg-slate-100 text-slate-700', icon: XCircle },
+    error: { color: 'bg-red-100 text-red-700', icon: AlertCircle },
+    syncing: { color: 'bg-blue-100 text-blue-700', icon: RefreshCw }
+  };
+
+  return (
+    <div className="p-6 space-y-6 bg-slate-100 min-h-screen">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Integrations</h1>
+          <p className="text-sm text-slate-500">Connect shipping carriers and sales channels</p>
+        </div>
+      </div>
+
+      <Tabs defaultValue="shipping" className="space-y-6">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="shipping">Shipping Carriers</TabsTrigger>
+          <TabsTrigger value="stores">Sales Channels</TabsTrigger>
+        </TabsList>
+
+        {/* Shipping Integrations */}
+        <TabsContent value="shipping" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-600">{shippingIntegrations.length} shipping integrations</p>
+            <Button onClick={() => { setSelectedShipping(null); setShowShippingDialog(true); }} className="bg-slate-900">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Carrier
+            </Button>
+          </div>
+
+          {shippingIntegrations.length === 0 ? (
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-8 text-center">
+                <Truck className="w-12 h-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500 mb-4">No shipping integrations configured</p>
+                <Button onClick={() => setShowShippingDialog(true)} variant="outline">
+                  Add Your First Carrier
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid lg:grid-cols-2 gap-4">
+              {shippingIntegrations.map((integration) => {
+                const status = statusConfig[integration.status] || statusConfig.inactive;
+                const StatusIcon = status.icon;
+                const provider = shippingProviders.find(p => p.value === integration.provider);
+                return (
+                  <Card key={integration.id} className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                            <Truck className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-slate-900">{integration.name}</h3>
+                            <p className="text-xs text-slate-500">{provider?.label || integration.provider}</p>
+                          </div>
+                        </div>
+                        <Badge className={status.color}>
+                          <StatusIcon className="w-3 h-3 mr-1" />
+                          {integration.status}
+                        </Badge>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Default Carrier:</span>
+                          <span className="font-medium">{integration.default_carrier || '—'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Carriers:</span>
+                          <span className="font-medium">{integration.enabled_carriers?.length || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Auto Rate Shop:</span>
+                          <span className="font-medium">{integration.settings?.auto_rate_shop ? 'Yes' : 'No'}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-4 pt-4 border-t">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => { setSelectedShipping(integration); setShowShippingDialog(true); }}
+                        >
+                          <Settings className="w-3 h-3 mr-1" />
+                          Configure
+                        </Button>
+                        <Button 
+                          variant={integration.status === 'active' ? 'default' : 'outline'}
+                          size="sm"
+                          className={integration.status === 'active' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                          onClick={() => updateShippingMutation.mutate({ 
+                            id: integration.id, 
+                            data: { status: integration.status === 'active' ? 'inactive' : 'active' } 
+                          })}
+                        >
+                          {integration.status === 'active' ? 'Active' : 'Enable'}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Store Integrations */}
+        <TabsContent value="stores" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-600">{storeIntegrations.length} store connections</p>
+            <Button onClick={() => { setSelectedStore(null); setShowStoreDialog(true); }} className="bg-slate-900">
+              <Plus className="w-4 h-4 mr-2" />
+              Connect Store
+            </Button>
+          </div>
+
+          {storeIntegrations.length === 0 ? (
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-8 text-center">
+                <ShoppingCart className="w-12 h-12 mx-auto text-slate-300 mb-3" />
+                <p className="text-slate-500 mb-4">No sales channels connected</p>
+                <Button onClick={() => setShowStoreDialog(true)} variant="outline">
+                  Connect Your First Store
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid lg:grid-cols-2 gap-4">
+              {storeIntegrations.map((integration) => {
+                const status = statusConfig[integration.status] || statusConfig.inactive;
+                const StatusIcon = status.icon;
+                const platform = storePlatforms.find(p => p.value === integration.platform);
+                return (
+                  <Card key={integration.id} className="border-0 shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                            <ShoppingCart className="w-5 h-5 text-emerald-600" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-slate-900">{integration.name}</h3>
+                            <p className="text-xs text-slate-500">{platform?.label || integration.platform}</p>
+                          </div>
+                        </div>
+                        <Badge className={status.color}>
+                          <StatusIcon className="w-3 h-3 mr-1" />
+                          {integration.status}
+                        </Badge>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Auto Import:</span>
+                          <span className="font-medium">{integration.sync_settings?.auto_import_orders ? 'Yes' : 'No'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Sync Inventory:</span>
+                          <span className="font-medium">{integration.sync_settings?.sync_inventory ? 'Yes' : 'No'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Orders Synced:</span>
+                          <span className="font-medium">{integration.total_orders_synced || 0}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-4 pt-4 border-t">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => { setSelectedStore(integration); setShowStoreDialog(true); }}
+                        >
+                          <Settings className="w-3 h-3 mr-1" />
+                          Configure
+                        </Button>
+                        <Button 
+                          variant={integration.status === 'active' ? 'default' : 'outline'}
+                          size="sm"
+                          className={integration.status === 'active' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
+                          onClick={() => updateStoreMutation.mutate({ 
+                            id: integration.id, 
+                            data: { status: integration.status === 'active' ? 'inactive' : 'active' } 
+                          })}
+                        >
+                          {integration.status === 'active' ? 'Active' : 'Enable'}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Add/Edit Shipping Dialog */}
+      <Dialog open={showShippingDialog} onOpenChange={setShowShippingDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedShipping ? 'Configure' : 'Add'} Shipping Integration</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2 col-span-2">
+                <Label>Integration Name *</Label>
+                <Input placeholder="e.g., Primary ShipStation" />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label>Provider *</Label>
+                <Select>
+                  <SelectTrigger><SelectValue placeholder="Select provider" /></SelectTrigger>
+                  <SelectContent>
+                    {shippingProviders.map(p => (
+                      <SelectItem key={p.value} value={p.value}>
+                        <div>
+                          <p className="font-medium">{p.label}</p>
+                          <p className="text-xs text-slate-500">{p.desc}</p>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>API Key</Label>
+                <Input type="password" placeholder="Enter API key" />
+              </div>
+              <div className="space-y-2">
+                <Label>API Secret</Label>
+                <Input type="password" placeholder="Enter API secret" />
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-3">
+              <Label className="text-sm font-semibold">Automation Settings</Label>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Auto Rate Shopping</p>
+                  <p className="text-xs text-slate-500">Automatically select cheapest carrier</p>
+                </div>
+                <Switch />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Auto Print Labels</p>
+                  <p className="text-xs text-slate-500">Print labels on shipment creation</p>
+                </div>
+                <Switch />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Auto Send Tracking</p>
+                  <p className="text-xs text-slate-500">Email tracking to customers</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4 border-t">
+              <Button variant="outline" onClick={() => setShowShippingDialog(false)} className="flex-1">
+                Cancel
+              </Button>
+              <Button className="flex-1 bg-slate-900">
+                Save Integration
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Store Dialog */}
+      <Dialog open={showStoreDialog} onOpenChange={setShowStoreDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedStore ? 'Configure' : 'Connect'} Sales Channel</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2 col-span-2">
+                <Label>Store Name *</Label>
+                <Input placeholder="e.g., Main Shopify Store" />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label>Platform *</Label>
+                <Select>
+                  <SelectTrigger><SelectValue placeholder="Select platform" /></SelectTrigger>
+                  <SelectContent>
+                    {storePlatforms.map(p => (
+                      <SelectItem key={p.value} value={p.value}>
+                        <div>
+                          <p className="font-medium">{p.label}</p>
+                          <p className="text-xs text-slate-500">{p.desc}</p>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label>Store URL</Label>
+                <Input placeholder="https://yourstore.com" />
+              </div>
+              <div className="space-y-2">
+                <Label>API Key</Label>
+                <Input type="password" placeholder="Enter API key" />
+              </div>
+              <div className="space-y-2">
+                <Label>API Secret / Access Token</Label>
+                <Input type="password" placeholder="Enter secret" />
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-3">
+              <Label className="text-sm font-semibold">Sync Settings</Label>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Auto Import Orders</p>
+                  <p className="text-xs text-slate-500">Import new orders automatically</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Sync Inventory Levels</p>
+                  <p className="text-xs text-slate-500">Push inventory updates to store</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Update Tracking Numbers</p>
+                  <p className="text-xs text-slate-500">Send tracking info back to store</p>
+                </div>
+                <Switch defaultChecked />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm">Import Frequency (minutes)</Label>
+                <Input type="number" defaultValue="15" min="5" />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4 border-t">
+              <Button variant="outline" onClick={() => setShowStoreDialog(false)} className="flex-1">
+                Cancel
+              </Button>
+              <Button className="flex-1 bg-slate-900">
+                Connect Store
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
